@@ -4,7 +4,7 @@ use std::process::{Command, Stdio, exit};
 use std::time::{Instant};
 use std::io::{self, Write, Result};
 use std::env;
-use log::{info, trace, error};
+use log::{info, trace, warn, error};
 
 extern crate pretty_env_logger;
 
@@ -19,8 +19,14 @@ arg_enum! {
 #[derive(StructOpt, Debug)]
 #[structopt(name = "bin-wrapper", about = "Explanation of bin-wrapper usage.")]
 struct Cli {
-  #[structopt(long, possible_values = &Mode::variants(), case_insensitive = true, default_value = "Proxy")]
+  #[structopt(long, possible_values = &Mode::variants(), case_insensitive = true, default_value = "Proxy", help = "How should bin-wrapper redirect stdout/stderr ?")]
   mode: Mode,
+
+  #[structopt(long, help = "Lookup the provided ENV variable and skip execution if set")]
+  skip_if_env: Option<String>,
+
+  #[structopt(long, help = "Lookup the provided ENV variable and only resume execution if set")]
+  resume_if_env: Option<String>,
 
   command: String,
   args: Vec<String>,
@@ -37,6 +43,30 @@ fn main() -> Result<()> {
   let args = Cli::from_args();
 
   trace!("command line options: {:?}", args);
+
+  match args.skip_if_env {
+    Some(x) => {
+      if env::var(x).is_ok() {
+        warn!("*skip_if_env* present, ending execution");
+        exit(0)
+      } else {
+        info!("*skip_if_env* not set, resuming execution");
+      }
+    },
+    None => trace!("*skip_if_env* not present, resuming execution")
+  }
+
+  match args.resume_if_env {
+    Some(x) => {
+      if env::var(x).is_err() {
+        info!("*resume_if_env* not set, ending execution");
+        exit(0)
+      } else {
+        warn!("*resume_if_env* present, resuming execution");
+      }
+    },
+    None => trace!("*resume_if_env* not present, resuming execution")
+  }
 
   let command = args.command;
   let command_args  = args.args.join(" ");
