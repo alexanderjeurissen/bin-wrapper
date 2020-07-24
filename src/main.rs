@@ -141,7 +141,7 @@ fn main() -> Result<()> {
   let command = args.command;
   let command_args  = args.args.join(" ");
 
-  info!("attempting to run '{}'", command);
+  info!("attempting to run '{0}' with args '{1}'", command, command_args);
 
   let start = Instant::now();
 
