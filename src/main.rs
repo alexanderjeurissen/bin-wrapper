@@ -4,6 +4,7 @@ use std::process::{Command, Stdio, exit};
 use std::time::{Instant};
 use std::io::{self, Write, Result};
 use std::env;
+use atty::Stream;
 use log::{info, trace, warn, error};
 
 extern crate pretty_env_logger;
@@ -12,7 +13,8 @@ arg_enum! {
     #[derive(Debug)]
     enum Mode {
         Capture,
-        Proxy
+        Proxy,
+        CaptureFormachines
     }
 }
 
@@ -35,31 +37,29 @@ struct Cli {
   args: Vec<String>,
 }
 
-fn main() -> Result<()> {
+fn set_log_level() {
   // NOTE: ensure default log level is NONE
   if env::var("RUST_LOG").is_err() {
     env::set_var("RUST_LOG", "none")
   }
+}
 
-  pretty_env_logger::init();
-
-  let args = Cli::from_args();
-
-  trace!("command line options: {:?}", args);
-
-  match args.skip_if_env {
+fn process_skip_if_env(skip_if_env: Option<String>) {
+  match skip_if_env {
     Some(x) => {
       if env::var(x).is_ok() {
-        warn!("*skip_if_env* present, ending execution");
+        trace!("*skip_if_env* present, ending execution");
         exit(0)
       } else {
-        info!("*skip_if_env* not set, resuming execution");
+        trace!("*skip_if_env* not set, resuming execution");
       }
     },
     None => trace!("*skip_if_env* not present, resuming execution")
   }
+}
 
-  match args.resume_if_env {
+fn process_resume_if_env(resume_if_env: Option<String>) {
+  match resume_if_env {
     Some(x) => {
       if env::var(x).is_err() {
         info!("*resume_if_env* not set, ending execution");
@@ -70,6 +70,73 @@ fn main() -> Result<()> {
     },
     None => trace!("*resume_if_env* not present, resuming execution")
   }
+}
+
+fn redirect_std_out(stdout: Vec<u8>, mode: Mode) {
+  match mode {
+    Mode::Proxy => {
+      io::stdout().write_all(&stdout).expect("cant proxy stdOut");
+    },
+    Mode::Capture => {
+      let raw_output = String::from_utf8(stdout).unwrap();
+
+      raw_output
+        .lines()
+        .for_each(|x| trace!("{}", x));
+
+    },
+    Mode::CaptureFormachines => {
+      if atty::is(Stream::Stdout) {
+        io::stdout().write_all(&stdout).expect("cant proxy stdOut");
+      } else {
+        let raw_output = String::from_utf8(stdout).unwrap();
+
+        raw_output
+          .lines()
+          .for_each(|x| trace!("{}", x));
+      }
+    }
+  }
+}
+
+fn redirect_std_err(stderr: Vec<u8>, mode: Mode) {
+  match mode {
+    Mode::Proxy => {
+      io::stderr().write_all(&stderr).expect("cant proxy stdErr");
+    },
+    Mode::Capture => {
+      let raw_output = String::from_utf8(stderr).unwrap();
+
+      raw_output
+        .lines()
+        .for_each(|x| error!("{}", x));
+
+    },
+    Mode::CaptureFormachines => {
+      if atty::is(Stream::Stderr) {
+        io::stderr().write_all(&stderr).expect("cant proxy stdOut");
+      } else {
+        let raw_output = String::from_utf8(stderr).unwrap();
+
+        raw_output
+          .lines()
+          .for_each(|x| error!("{}", x));
+      }
+    }
+  }
+}
+
+fn main() -> Result<()> {
+  set_log_level();
+
+  pretty_env_logger::init();
+
+  let args = Cli::from_args();
+
+  trace!("command line options: {:?}", args);
+
+  process_skip_if_env(args.skip_if_env);
+  process_resume_if_env(args.resume_if_env);
 
   let command = args.command;
   let command_args  = args.args.join(" ");
@@ -89,33 +156,8 @@ fn main() -> Result<()> {
 
   let duration = start.elapsed();
 
-  match args.stdout {
-    Mode::Proxy => {
-      io::stdout().write_all(&output.stdout).expect("cant proxy stdOut");
-    },
-    Mode::Capture => {
-      let std_out = String::from_utf8(output.stdout).unwrap();
-
-      std_out
-        .lines()
-        .for_each(|x| trace!("{}", x));
-
-    }
-  }
-
-  match args.stderr {
-    Mode::Proxy => {
-      io::stderr().write_all(&output.stderr).expect("cant proxy stdErr");
-    },
-    Mode::Capture => {
-      let std_err = String::from_utf8(output.stderr).unwrap();
-
-      std_err
-        .lines()
-        .for_each(|x| trace!("{}", x));
-
-    }
-  }
+  redirect_std_out(output.stdout, args.stdout);
+  redirect_std_err(output.stderr, args.stderr);
 
   if output.status.success() {
     info!("'{0}' finished after {1:?} with exit code: {2:?}", command, duration, output.status);
