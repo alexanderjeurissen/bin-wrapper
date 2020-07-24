@@ -23,7 +23,7 @@ three modes are supported:
 - `Capture` => consume stdout and stderr and print it to logs
   - prints `stdout` to TRACE log level
   - prints `stderr` to DEBUG log level
-- `CaptureForMachines` => consume stdout and stderr and print it to logs if the script is run by a machine (aka not a terminal).
+- `CaptureForMachines` => consume stdout or stderr and print it to logs if the script is run by a machine (aka not a terminal).
 
 #### Env variable guards
 
