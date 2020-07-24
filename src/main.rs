@@ -19,8 +19,11 @@ arg_enum! {
 #[derive(StructOpt, Debug)]
 #[structopt(name = "bin-wrapper", about = "Explanation of bin-wrapper usage.")]
 struct Cli {
-  #[structopt(long, possible_values = &Mode::variants(), case_insensitive = true, default_value = "Proxy", help = "How should bin-wrapper redirect stdout/stderr ?")]
-  mode: Mode,
+  #[structopt(long, possible_values = &Mode::variants(), case_insensitive = true, default_value = "Proxy", help = "How should bin-wrapper redirect stdout ?")]
+  stdout: Mode,
+
+  #[structopt(long, possible_values = &Mode::variants(), case_insensitive = true, default_value = "Proxy", help = "How should bin-wrapper redirect stderr ?")]
+  stderr: Mode,
 
   #[structopt(long, help = "Lookup the provided ENV variable and skip execution if set")]
   skip_if_env: Option<String>,
@@ -86,23 +89,31 @@ fn main() -> Result<()> {
 
   let duration = start.elapsed();
 
-  match args.mode {
+  match args.stdout {
     Mode::Proxy => {
-      io::stdout().write_all(&output.stdout).expect("cant proxy StdOut");
-      io::stderr().write_all(&output.stderr).expect("cant proxy stdErr");
+      io::stdout().write_all(&output.stdout).expect("cant proxy stdOut");
     },
     Mode::Capture => {
-      let raw_std_out = String::from_utf8(output.stdout).unwrap();
+      let std_out = String::from_utf8(output.stdout).unwrap();
 
-      raw_std_out
+      std_out
         .lines()
         .for_each(|x| trace!("{}", x));
 
-      let raw_std_err = String::from_utf8(output.stderr).unwrap();
+    }
+  }
 
-      raw_std_err
+  match args.stderr {
+    Mode::Proxy => {
+      io::stderr().write_all(&output.stderr).expect("cant proxy stdErr");
+    },
+    Mode::Capture => {
+      let std_err = String::from_utf8(output.stderr).unwrap();
+
+      std_err
         .lines()
-        .for_each(|x| error!("{}", x));
+        .for_each(|x| trace!("{}", x));
+
     }
   }
 

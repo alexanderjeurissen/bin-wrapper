@@ -16,8 +16,9 @@ decorates bin stubs with the great logging / debugging utilities from Rust.
 
 Nested commands can be very verbose. Instead of dealing with a huge variance of verbosity flags, let bin-wrapper capture all noisy output and print out the content you care about.
 
-two modes are supported:
+two options `--stdout` and `--stderr` can be configured.
 
+two modes are supported:
 - Proxy => simply pass-through the stdout and stderr (default behaviour)
 - Capture => consume stdout and stderr and print it to logs
   - prints `stdout` to TRACE log level
@@ -56,10 +57,12 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
-        --mode <mode>                      How should bin-wrapper redirect stdout/stderr ? [default: Proxy]  [possible
-                                           values: Capture, Proxy]
         --resume-if-env <resume-if-env>    Lookup the provided ENV variable and only resume execution if set
         --skip-if-env <skip-if-env>        Lookup the provided ENV variable and skip execution if set
+        --stderr <stderr>                  How should bin-wrapper redirect stderr ? [default: Proxy]  [possible values:
+                                           Capture, Proxy]
+        --stdout <stdout>                  How should bin-wrapper redirect stdout ? [default: Proxy]  [possible values:
+                                           Capture, Proxy]
 
 ARGS:
     <command>
