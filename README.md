@@ -3,6 +3,8 @@
 Simple binstub wrapper written in rust.
 Aims to extract common features in bin_stubs so bin_stubs can focus on the actual business logic.
 
+![image](https://github.com/alexanderjeurissen/bin-wrapper/blob/main/public/assets/output_redirection.png)
+
 ### Features:
 
 decorates bin stubs with the great logging / debugging utilities from Rust.
