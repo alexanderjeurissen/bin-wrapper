@@ -3,6 +3,8 @@
 Simple binstub wrapper written in rust.
 Aims to extract common features in bin_stubs so bin_stubs can focus on the actual business logic.
 
+![image](https://github.com/alexanderjeurissen/bin-wrapper/blob/main/public/output_redirection.png)
+
 ### Features:
 
 decorates bin stubs with the great logging / debugging utilities from Rust.
@@ -21,7 +23,7 @@ three modes are supported:
 - `Capture` => consume stdout and stderr and print it to logs
   - prints `stdout` to TRACE log level
   - prints `stderr` to DEBUG log level
-- `CaptureForMachines` => consume stdout and stderr and print it to logs if the script is run by a machine (aka not a terminal).
+- `CaptureForMachines` => consume stdout or stderr and print it to logs if the script is run by a machine (aka not a terminal).
 
 #### Env variable guards
 
