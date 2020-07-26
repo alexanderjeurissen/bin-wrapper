@@ -2,7 +2,7 @@ use atty::Stream;
 use log::{debug, error, info, trace};
 use std::env;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{BufRead, BufReader};
 use std::process::exit;
 use std::thread;
 use std::time::Instant;
@@ -111,7 +111,7 @@ fn capture(file: File, logger: Logger) -> thread::JoinHandle<()> {
   });
 }
 
-fn main() -> io::Result<()> {
+fn main() {
   let start = Instant::now();
   set_log_level();
 
@@ -152,7 +152,7 @@ fn main() -> io::Result<()> {
     err_handle = Some(capture(stderr, Logger::Stderr));
   };
 
-  let exit_status = p.wait();
+  let exit_status = p.wait().unwrap();
 
   let p_duration = p_start.elapsed();
 
@@ -167,20 +167,17 @@ fn main() -> io::Result<()> {
   }
 
   let duration = start.elapsed();
-  match exit_status {
-    Ok(v) => {
-      debug!(
-        "'{0}' FINISHED after {1:?} (total: {2:?}) exit status: {3:?}",
-        command, p_duration, duration, v
-      );
-      exit(0);
-    }
-    Err(e) => {
-      debug!(
-        "'{0}' FAILED after {1:?} (total: {2:?}) exit status: {3:?}",
-        command, p_duration, duration, e
-      );
-      exit(1);
-    }
+  if exit_status.success() {
+    debug!(
+      "'{0}' FINISHED after {1:?} (total: {2:?}) exit status: {3:?}",
+      command, p_duration, duration, &exit_status
+    );
+    exit(0);
+  } else {
+    debug!(
+      "'{0}' FAILED after {1:?} (total: {2:?}) exit status: {3:?}",
+      command, p_duration, duration, &exit_status
+    );
+    exit(1);
   }
 }
