@@ -1,11 +1,14 @@
 use atty::Stream;
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use std::env;
-use std::io::{self, Result, Write};
-use std::process::{exit, Command, Stdio};
+use std::fs::File;
+use std::io::{self, BufRead, BufReader};
+use std::process::exit;
+use std::thread;
 use std::time::Instant;
 use structopt::clap::arg_enum;
 use structopt::StructOpt;
+use subprocess::{Popen, PopenConfig, Redirection};
 
 extern crate pretty_env_logger;
 
@@ -39,14 +42,13 @@ struct Cli {
   )]
   resume_if_env: Option<String>,
 
-  command: String,
-  args: Vec<String>,
+  command: Vec<String>,
 }
 
 fn set_log_level() {
   // NOTE: ensure default log level is NONE
-  if env::var("RUST_LOG").is_err() {
-    env::set_var("RUST_LOG", "none")
+  if env::var("LOG").is_err() {
+    env::set_var("LOG", "none")
   }
 }
 
@@ -78,51 +80,39 @@ fn process_resume_if_env(resume_if_env: Option<String>) {
   }
 }
 
-fn redirect_std_out(stdout: Vec<u8>, mode: Mode) {
+// NOTE: create a pipe based on the --stdout / --stderr mode
+fn pipe(mode: &Mode) -> Redirection {
   match mode {
-    Mode::Proxy => {
-      io::stdout().write_all(&stdout).expect("cant proxy stdOut");
-    }
-    Mode::Capture => {
-      let raw_output = String::from_utf8(stdout).unwrap();
-
-      raw_output.lines().for_each(|x| trace!("{}", x));
-    }
+    Mode::Proxy => Redirection::None,
+    Mode::Capture => Redirection::Pipe,
     Mode::CaptureFormachines => {
       if atty::is(Stream::Stdout) {
-        io::stdout().write_all(&stdout).expect("cant proxy stdOut");
+        Redirection::None
       } else {
-        let raw_output = String::from_utf8(stdout).unwrap();
-
-        raw_output.lines().for_each(|x| trace!("{}", x));
+        Redirection::Pipe
       }
     }
   }
 }
 
-fn redirect_std_err(stderr: Vec<u8>, mode: Mode) {
-  match mode {
-    Mode::Proxy => {
-      io::stderr().write_all(&stderr).expect("cant proxy stdErr");
-    }
-    Mode::Capture => {
-      let raw_output = String::from_utf8(stderr).unwrap();
+// NOTE: create a thread to capture and buffer the output of p.stdout / p.stderr
+enum Logger {
+  Stdout,
+  Stderr,
+}
+fn capture(file: File, logger: Logger) -> thread::JoinHandle<()> {
+  return thread::spawn(move || {
+    let reader = BufReader::new(file);
 
-      raw_output.lines().for_each(|x| error!("{}", x));
-    }
-    Mode::CaptureFormachines => {
-      if atty::is(Stream::Stderr) {
-        io::stderr().write_all(&stderr).expect("cant proxy stdOut");
-      } else {
-        let raw_output = String::from_utf8(stderr).unwrap();
-
-        raw_output.lines().for_each(|x| error!("{}", x));
-      }
-    }
-  }
+    reader.lines().for_each(|line| match logger {
+      Logger::Stdout => info!("{}", line.unwrap()),
+      Logger::Stderr => error!("{}", line.unwrap()),
+    });
+  });
 }
 
-fn main() -> Result<()> {
+fn main() -> io::Result<()> {
+  let start = Instant::now();
   set_log_level();
 
   pretty_env_logger::init_custom_env("LOG");
@@ -134,41 +124,63 @@ fn main() -> Result<()> {
   process_skip_if_env(args.skip_if_env);
   process_resume_if_env(args.resume_if_env);
 
-  let command = args.command;
-  let command_args = args.args.join(" ");
+  let command = args.command.join(" ");
 
-  info!(
-    "attempting to run '{}' with args '{}'",
-    command, command_args
-  );
+  debug!("attempting to run '{}'", command);
 
-  let start = Instant::now();
+  let p_start = Instant::now();
 
-  let child = Command::new(&command)
-    .arg(&command_args)
-    .stdin(Stdio::inherit())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .spawn()?;
+  let mut p = Popen::create(
+    &args.command,
+    PopenConfig {
+      stdout: pipe(&args.stdout),
+      stderr: pipe(&args.stderr),
+      ..Default::default()
+    },
+  )
+  .unwrap();
 
-  let output = child.wait_with_output()?;
+  let mut out_handle: Option<thread::JoinHandle<()>> = None;
+  if let Redirection::Pipe = pipe(&args.stdout) {
+    let stdout = p.stdout.take().unwrap();
+    out_handle = Some(capture(stdout, Logger::Stdout));
+  }
+
+  let mut err_handle: Option<thread::JoinHandle<()>> = None;
+  if let Redirection::Pipe = pipe(&args.stderr) {
+    let stderr = p.stderr.take().unwrap();
+    err_handle = Some(capture(stderr, Logger::Stderr));
+  };
+
+  let exit_status = p.wait();
+
+  let p_duration = p_start.elapsed();
+
+  match out_handle {
+    Some(v) => v.join().unwrap(),
+    None => trace!("stdout logger thread not present, no need to wait."),
+  }
+
+  match err_handle {
+    Some(v) => v.join().unwrap(),
+    None => trace!("stderr logger thread not present, no need to wait."),
+  }
 
   let duration = start.elapsed();
-
-  redirect_std_out(output.stdout, args.stdout);
-  redirect_std_err(output.stderr, args.stderr);
-
-  if output.status.success() {
-    info!(
-      "'{0}' finished after {1:?} with exit code: {2:?}",
-      command, duration, output.status
-    );
-    exit(0)
-  } else {
-    error!(
-      "'{0}' failed after {1:?} with exit code {2:?}",
-      command, duration, output.status
-    );
-    exit(1)
+  match exit_status {
+    Ok(v) => {
+      debug!(
+        "'{0}' FINISHED after {1:?} (total: {2:?}) exit status: {3:?}",
+        command, p_duration, duration, v
+      );
+      exit(0);
+    }
+    Err(e) => {
+      debug!(
+        "'{0}' FAILED after {1:?} (total: {2:?}) exit status: {3:?}",
+        command, p_duration, duration, e
+      );
+      exit(1);
+    }
   }
 }
