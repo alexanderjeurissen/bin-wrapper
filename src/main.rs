@@ -162,7 +162,6 @@ fn main() {
   let duration = start.elapsed();
 
   debug!(
-    logger,
     "'{0}' FINISHED after {1:?} (total: {2:?}) exit code: {3:?}",
     command,
     p_duration,
