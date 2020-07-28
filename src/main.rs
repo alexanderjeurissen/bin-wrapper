@@ -1,14 +1,11 @@
 use atty::Stream;
-use log::{debug, error, info, trace};
+use log::Level;
+use log::{debug, error, info, log_enabled, trace};
 use std::env;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::process::exit;
-use std::thread;
+use std::process::{exit, Command, Stdio};
 use std::time::Instant;
 use structopt::clap::arg_enum;
 use structopt::StructOpt;
-use subprocess::{Popen, PopenConfig, Redirection};
 
 extern crate pretty_env_logger;
 
@@ -42,7 +39,8 @@ struct Cli {
   )]
   resume_if_env: Option<String>,
 
-  command: Vec<String>,
+  command: String,
+  command_args: Vec<String>,
 }
 
 fn process_skip_if_env(skip_if_env: Option<String>) {
@@ -74,34 +72,24 @@ fn process_resume_if_env(resume_if_env: Option<String>) {
 }
 
 // NOTE: create a pipe based on the --stdout / --stderr mode
-fn pipe(mode: &Mode) -> Redirection {
+fn pipe(mode: &Mode) -> Stdio {
   match mode {
-    Mode::Proxy => Redirection::None,
-    Mode::Capture => Redirection::Pipe,
+    Mode::Proxy => Stdio::inherit(),
+    Mode::Capture => match log_enabled!(Level::Debug) {
+      true => Stdio::inherit(),
+      false => Stdio::null(),
+    },
     Mode::CaptureFormachines => {
       if atty::is(Stream::Stdout) {
-        Redirection::None
+        Stdio::inherit()
       } else {
-        Redirection::Pipe
+        match log_enabled!(Level::Debug) {
+          true => Stdio::inherit(),
+          false => Stdio::null(),
+        }
       }
     }
   }
-}
-
-// NOTE: create a thread to capture and buffer the output of p.stdout / p.stderr
-enum Logger {
-  Stdout,
-  Stderr,
-}
-fn capture(file: File, logger: Logger) -> thread::JoinHandle<()> {
-  return thread::spawn(move || {
-    let reader = BufReader::new(file);
-
-    reader.lines().for_each(|line| match logger {
-      Logger::Stdout => info!("{}", line.unwrap()),
-      Logger::Stderr => error!("{}", line.unwrap()),
-    });
-  });
 }
 
 fn main() {
@@ -114,63 +102,42 @@ fn main() {
   process_skip_if_env(args.skip_if_env);
   process_resume_if_env(args.resume_if_env);
 
-  let command = &args.command.join(" ");
+  let command = &args.command;
+  let command_args = &args.command_args.join(" ");
 
-  debug!("attempting to run '{}'", command);
+  info!(
+    "attempting to run '{}' with args: '{}'",
+    command, command_args
+  );
 
   let p_start = Instant::now();
 
-  let mut p = Popen::create(
-    &args.command,
-    PopenConfig {
-      stdout: pipe(&args.stdout),
-      stderr: pipe(&args.stderr),
-      ..Default::default()
-    },
-  )
-  .unwrap();
-
-  let mut out_handle: Option<thread::JoinHandle<()>> = None;
-  if let Redirection::Pipe = pipe(&args.stdout) {
-    let stdout = p.stdout.take().unwrap();
-    out_handle = Some(capture(stdout, Logger::Stdout));
-  }
-
-  let mut err_handle: Option<thread::JoinHandle<()>> = None;
-  if let Redirection::Pipe = pipe(&args.stderr) {
-    let stderr = p.stderr.take().unwrap();
-    err_handle = Some(capture(stderr, Logger::Stderr));
-  };
+  let mut child = Command::new(&args.command)
+    .args(&args.command_args)
+    .stdout(pipe(&args.stdout))
+    .stderr(pipe(&args.stderr))
+    .spawn()
+    .expect("failed to execute child process");
 
   // NOTE: wait for process to finish
-  p.wait().unwrap();
+  let output = child.wait().expect("failed to wait on child process");
 
   // NOTE: process has finished, log execution time
   let p_duration = p_start.elapsed();
 
-  match out_handle {
-    Some(v) => v.join().unwrap(),
-    None => trace!("stdout logger thread not present, no need to wait."),
-  }
-
-  match err_handle {
-    Some(v) => v.join().unwrap(),
-    None => trace!("stderr logger thread not present, no need to wait."),
-  }
-
   // NOTE: we are done log total execution time
   let duration = start.elapsed();
 
-  debug!(
+  info!(
     "'{0}' FINISHED after {1:?} (total: {2:?}) exit code: {3:?}",
     command,
     p_duration,
     duration,
-    p.exit_status()
+    output.code().unwrap()
   );
 
-  std::process::exit(match p.exit_status().unwrap() {
-    subprocess::ExitStatus::Exited(a) => a as i32,
-    _ => panic!(),
+  std::process::exit(match output.code() {
+    Some(code) => code,
+    None => panic!(),
   });
 }
